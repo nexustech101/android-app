@@ -34,6 +34,10 @@ data class AppState(
     val jobs: List<Job> = emptyList(),
     /** MediaStore image id -> Google Drive file id, for photos already uploaded. */
     val uploaded: Map<Long, String> = emptyMap(),
+    /** Drive file/folder ids to move to Drive's trash on the next sync (deleted photos and jobs). */
+    val driveTrash: List<String> = emptyList(),
+    /** Drive file id -> new name, for photos renamed after they were uploaded. */
+    val driveRenames: Map<String, String> = emptyMap(),
 )
 
 data class Photo(

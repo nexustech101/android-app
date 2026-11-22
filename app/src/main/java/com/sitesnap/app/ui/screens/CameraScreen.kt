@@ -8,18 +8,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +59,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -68,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Observer
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import com.sitesnap.app.data.Job
@@ -78,6 +88,8 @@ import com.sitesnap.app.ui.components.PillButton
 import com.sitesnap.app.ui.theme.SiteSnapColors
 import com.sitesnap.app.ui.theme.SiteSnapType
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -118,39 +130,79 @@ private fun CameraContent(job: Job, photoRepo: PhotoRepository, onPhotoSaved: ()
     var backCamera by remember { mutableStateOf(true) }
     var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
     var zoom by remember { mutableFloatStateOf(1f) }
+    var zoomRange by remember { mutableStateOf(1f..1f) }
+    var zoomDial by remember { mutableStateOf(false) }
+    var zoomTouches by remember { mutableIntStateOf(0) }
+    var zoomAnimation by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var focusTaps by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
     var lastUri by remember { mutableStateOf<Uri?>(null) }
     var sessionCount by remember { mutableIntStateOf(0) }
+    var nextNumber by remember { mutableIntStateOf(0) } // running photo number for default names
     var capturing by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<Pair<String, Boolean>?>(null) } // text, success
 
     LaunchedEffect(flashMode) { imageCapture.flashMode = flashMode }
+    LaunchedEffect(job.id) { nextNumber = photoRepo.nextPhotoNumber(job) }
     LaunchedEffect(backCamera) {
         val provider = context.cameraProvider()
         val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
         val selector = if (backCamera) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
         runCatching {
             provider.unbindAll()
+            zoomAnimation?.cancel()
             camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
             zoom = 1f
         }.onFailure { toast = "Couldn't start the camera" to false }
     }
-    LaunchedEffect(zoom, camera) { camera?.cameraControl?.setZoomRatio(zoom) }
+    // Push every zoom change to the camera; snapshotFlow keeps up with pinch and animation frames.
+    LaunchedEffect(camera) {
+        val control = camera?.cameraControl ?: return@LaunchedEffect
+        snapshotFlow { zoom }.collect { control.setZoomRatio(it) }
+    }
+    // The lens range (ultra-wide, max digital zoom) differs per camera, so follow CameraX's zoom state.
+    DisposableEffect(camera, lifecycleOwner) {
+        val state = camera?.cameraInfo?.zoomState
+        val observer = Observer<androidx.camera.core.ZoomState> { zoomRange = it.minZoomRatio..it.maxZoomRatio }
+        state?.observe(lifecycleOwner, observer)
+        onDispose { state?.removeObserver(observer) }
+    }
+    // The slider stays up while it's in use and hides a few seconds after the last touch.
+    LaunchedEffect(zoomTouches) { if (zoomTouches > 0) { delay(2_500); zoomDial = false } }
     LaunchedEffect(toast, sessionCount) { if (toast != null) { delay(2_200); toast = null } }
 
-    val zoomRange = camera?.cameraInfo?.zoomState?.value
-    val zoomStops = buildList {
-        val min = zoomRange?.minZoomRatio ?: 1f
-        val max = zoomRange?.maxZoomRatio ?: 1f
-        if (min < 0.9f) add(min)
-        add(1f)
-        if (max >= 2f) add(2f)
+    /** Immediate zoom (pinch, dial scrub). Shows the dial and keeps it up while the user is zooming. */
+    fun scrubZoom(value: Float) {
+        zoomAnimation?.cancel()
+        zoom = value.coerceIn(zoomRange.start, zoomRange.endInclusive)
+        zoomDial = true
+        zoomTouches++
+    }
+
+    /** Smooth jump to a lens stop, like tapping 2× in a phone's camera app. */
+    fun animateZoom(target: Float) {
+        zoomAnimation?.cancel()
+        zoomAnimation = scope.launch {
+            animate(zoom, target.coerceIn(zoomRange.start, zoomRange.endInclusive), animationSpec = tween(280, easing = FastOutSlowInEasing)) { v, _ -> zoom = v }
+        }
+    }
+
+    fun focusAt(point: Offset) {
+        val control = camera?.cameraControl ?: return
+        val metering = previewView.meteringPointFactory.createPoint(point.x, point.y)
+        control.startFocusAndMetering(FocusMeteringAction.Builder(metering).setAutoCancelDuration(5, TimeUnit.SECONDS).build())
+        focusPoint = point
+        focusTaps++
     }
 
     fun takePhoto() {
         if (capturing) return
         capturing = true
+        val number = nextNumber.coerceAtLeast(1)
+        nextNumber = number + 1
         imageCapture.takePicture(
-            photoRepo.captureOptions(job),
+            photoRepo.captureOptions(job, number),
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
@@ -181,6 +233,15 @@ private fun CameraContent(job: Job, photoRepo: PhotoRepository, onPhotoSaved: ()
                 }
             }
             Box(Modifier.fillMaxWidth().height(140.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent))))
+            // Pinch anywhere to zoom, tap to focus.
+            Box(
+                Modifier.fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, zoomChange, _ -> if (zoomChange != 1f) scrubZoom(zoom * zoomChange) }
+                    }
+                    .pointerInput(Unit) { detectTapGestures(onTap = { focusAt(it) }) },
+            )
+            FocusRing(focusPoint, focusTaps)
 
             // Top controls
             Row(
@@ -240,23 +301,14 @@ private fun CameraContent(job: Job, photoRepo: PhotoRepository, onPhotoSaved: ()
                         Text(text, style = SiteSnapType.Caption, color = Color.White)
                     }
                 }
-                if (zoomStops.size > 1) {
-                    Row(
-                        Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.35f)).padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        zoomStops.forEach { stop ->
-                            val active = kotlin.math.abs(zoom - stop) < 0.05f
-                            Box(
-                                Modifier.size(32.dp).clip(CircleShape).background(if (active) Color.White else Color.Transparent)
-                                    .clickable(role = Role.Button) { zoom = stop },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(zoomLabel(stop, active), style = SiteSnapType.Caption, color = if (active) SiteSnapColors.Ink else Color.White)
-                            }
-                        }
-                    }
-                }
+                ZoomControls(
+                    zoom = zoom,
+                    range = zoomRange,
+                    dialVisible = zoomDial,
+                    onStopTapped = ::animateZoom,
+                    onScrub = ::scrubZoom,
+                    onOpenSlider = { zoomDial = true; zoomTouches++ },
+                )
             }
         }
 
@@ -293,11 +345,6 @@ private fun CameraContent(job: Job, photoRepo: PhotoRepository, onPhotoSaved: ()
             )
         }
     }
-}
-
-private fun zoomLabel(stop: Float, active: Boolean): String {
-    val base = if (stop < 1f) ".${(stop * 10).toInt()}" else stop.toInt().toString()
-    return if (active) "$base×" else base
 }
 
 private suspend fun Context.cameraProvider(): ProcessCameraProvider = suspendCoroutine { cont ->

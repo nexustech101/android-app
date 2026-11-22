@@ -1,6 +1,7 @@
 package com.sitesnap.app
 
 import android.app.Application
+import android.content.IntentSender
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -14,6 +15,8 @@ import com.sitesnap.app.drive.SyncWorker
 import com.sitesnap.app.update.Release
 import com.sitesnap.app.update.UpdateState
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -35,6 +38,9 @@ data class JobSummary(
 ) {
     val lastActivity: Long get() = lastPhotoAt ?: job.createdAt
 }
+
+/** Android's own "Allow SiteSnap to…" dialog, needed for photos this install didn't take. */
+class ConsentRequest(val intentSender: IntentSender, val onResult: suspend (granted: Boolean) -> Unit)
 
 data class StorageSummary(val photos: Int, val bytes: Long, val backedUp: Int, val backupEligible: Int)
 
@@ -127,6 +133,81 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             created?.let(onCreated)
         }
+    }
+
+    private val _consent = MutableStateFlow<ConsentRequest?>(null)
+    val consent: StateFlow<ConsentRequest?> = _consent.asStateFlow()
+
+    fun onConsentResult(granted: Boolean) {
+        val request = _consent.value ?: return
+        _consent.value = null
+        viewModelScope.launch { request.onResult(granted) }
+    }
+
+    /**
+     * Deletes the job and its photos on this phone. Drive copies stay unless [trashInDrive], which moves
+     * the job's Drive folder to Drive's trash. [onDone] runs once the job is gone.
+     */
+    fun deleteJob(job: Job, trashInDrive: Boolean, onDone: () -> Unit) {
+        viewModelScope.launch {
+            val photos = photoRepo.photosFor(job)
+            suspend fun finish() {
+                val ids = photos.map { it.id }.toSet()
+                store.update { s ->
+                    s.copy(
+                        jobs = s.jobs.filterNot { it.id == job.id },
+                        uploaded = s.uploaded - ids,
+                        driveTrash = if (trashInDrive && job.driveFolderId != null) s.driveTrash + job.driveFolderId else s.driveTrash,
+                    )
+                }
+                if (trashInDrive) applyDriveChanges()
+                onDone()
+            }
+            val blocked = photoRepo.delete(photos)
+            val ask = blocked.takeIf { it.isNotEmpty() }?.let(photoRepo::deleteConsent)
+            if (ask == null) finish()
+            else _consent.value = ConsentRequest(ask) { granted -> if (granted) finish() }
+        }
+    }
+
+    /** Deletes photos from the phone and moves any uploaded copies to Drive's trash. */
+    fun deletePhotos(photos: List<Photo>, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            suspend fun forget(gone: List<Photo>) {
+                val ids = gone.map { it.id }.toSet()
+                store.update { s ->
+                    s.copy(uploaded = s.uploaded - ids, driveTrash = s.driveTrash + ids.mapNotNull { s.uploaded[it] })
+                }
+                applyDriveChanges()
+                onDone()
+            }
+            val blocked = photoRepo.delete(photos)
+            val deleted = photos - blocked.toSet()
+            val ask = blocked.takeIf { it.isNotEmpty() }?.let(photoRepo::deleteConsent)
+            if (ask == null) forget(deleted)
+            else _consent.value = ConsentRequest(ask) { granted -> forget(if (granted) photos else deleted) }
+        }
+    }
+
+    /** Renames a photo on the phone, and in Drive if it's already been uploaded. */
+    fun renamePhoto(photo: Photo, name: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            suspend fun follow() {
+                val fileId = state.value.uploaded[photo.id] ?: return
+                store.update { it.copy(driveRenames = it.driveRenames + (fileId to photoRepo.fileNameFor(photo, name))) }
+                applyDriveChanges()
+            }
+            if (photoRepo.rename(photo, name)) return@launch follow()
+            val ask = photoRepo.writeConsent(listOf(photo)) ?: return@launch
+            _consent.value = ConsentRequest(ask) { granted -> if (granted && photoRepo.rename(photo, name)) follow() }
+        }
+    }
+
+    /** Trash and rename requests are tiny, so send them on any network. */
+    private fun applyDriveChanges() {
+        val s = state.value
+        if (s.driveConnected && (s.driveTrash.isNotEmpty() || s.driveRenames.isNotEmpty())) SyncWorker.enqueue(app, wifiOnly = false)
     }
 
     fun onDriveConnected(email: String?) {

@@ -24,6 +24,16 @@ class DriveSync(
             ?: drive.findOrCreateFolder(PhotoRepository.ROOT_FOLDER, null)
                 .also { id -> store.update { it.copy(driveRootId = id) } }
 
+        // Changes made on the phone since the last sync: deleted photos/jobs go to Drive's trash, renames follow.
+        for (id in store.state.value.driveTrash) {
+            drive.trash(id)
+            store.update { it.copy(driveTrash = it.driveTrash - id) }
+        }
+        for ((id, name) in store.state.value.driveRenames) {
+            drive.rename(id, name)
+            store.update { s -> if (s.driveRenames[id] == name) s.copy(driveRenames = s.driveRenames - id) else s }
+        }
+
         var count = 0
         for (job in store.state.value.jobs.filter { it.syncToDrive }) {
             val pending = photos.photosFor(job).filter { it.id !in store.state.value.uploaded }

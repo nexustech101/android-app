@@ -89,7 +89,7 @@ fun DriveLogo(modifier: Modifier = Modifier, size: Dp = 20.dp) {
 
 // ---------- Buttons ----------
 
-enum class ButtonStyle { Primary, Secondary, Accent, Ghost }
+enum class ButtonStyle { Primary, Secondary, Accent, Ghost, Danger }
 
 @Composable
 fun PillButton(
@@ -107,6 +107,7 @@ fun PillButton(
         ButtonStyle.Secondary -> SiteSnapColors.Fill to SiteSnapColors.Ink
         ButtonStyle.Accent -> SiteSnapColors.Accent to SiteSnapColors.OnInk
         ButtonStyle.Ghost -> Color.Transparent to SiteSnapColors.InkMuted
+        ButtonStyle.Danger -> SiteSnapColors.Danger to SiteSnapColors.OnInk
     }
     val shape = RoundedCornerShape(50)
     Row(

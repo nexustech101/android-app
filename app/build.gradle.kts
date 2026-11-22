@@ -28,8 +28,9 @@ android {
         minSdk = 29
         targetSdk = 36
         // Bump both for every GitHub release. versionName must match the release tag (v1.0.0 -> 1.0.0).
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
         buildConfigField("String", "UPDATE_API_BASE", "\"$updateApiBase\"")
@@ -103,4 +104,9 @@ dependencies {
 
     // Thumbnails from MediaStore content:// URIs
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // On-device UI tests (two-finger pinch etc.): ./gradlew connectedDebugAndroidTest
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

@@ -3,7 +3,9 @@ package com.sitesnap.app.data
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.IntentSender
 import android.database.ContentObserver
+import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -29,11 +31,27 @@ class PhotoRepository(private val context: Context) {
 
     fun relativePath(job: Job): String = "$ROOT_PATH${job.folderName}/"
 
+    /**
+     * Default photo name: date, property and a running number, e.g. "2026-11-22 1420 Oak St 007".
+     * Uses the street part of the address, or the job name when there's no address.
+     */
+    fun defaultName(job: Job, number: Int, at: Date = Date()): String {
+        val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(at)
+        val place = job.address.substringBefore(",").ifBlank { job.name }.toFolderName().take(50)
+        return "$date $place ${"%03d".format(Locale.US, number)}"
+    }
+
+    /** Next running number for [job]: one past the highest number on its photos (gaps from deletes aren't reused). */
+    suspend fun nextPhotoNumber(job: Job): Int {
+        val photos = photosFor(job)
+        val highest = photos.mapNotNull { NUMBER_SUFFIX.find(it.displayName.substringBeforeLast('.'))?.groupValues?.get(1)?.toIntOrNull() }.maxOrNull()
+        return maxOf(highest ?: 0, photos.size) + 1
+    }
+
     /** Output target for CameraX: it inserts into MediaStore and handles IS_PENDING for us. */
-    fun captureOptions(job: Job): ImageCapture.OutputFileOptions {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+    fun captureOptions(job: Job, number: Int): ImageCapture.OutputFileOptions {
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "${job.folderName.take(40)}_$stamp")
+            put(MediaStore.Images.Media.DISPLAY_NAME, defaultName(job, number))
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             put(MediaStore.Images.Media.RELATIVE_PATH, relativePath(job))
         }
@@ -84,6 +102,45 @@ class PhotoRepository(private val context: Context) {
         } ?: emptyList()
     }
 
+    /**
+     * Deletes [photos]. Returns the ones Android wouldn't let us delete without asking, which are photos
+     * this install of SiteSnap didn't take (for example from before a reinstall); see [deleteConsent].
+     */
+    suspend fun delete(photos: List<Photo>): List<Photo> = withContext(Dispatchers.IO) {
+        photos.filter { photo ->
+            try {
+                resolver.delete(photo.uri, null, null)
+                false
+            } catch (e: SecurityException) {
+                true
+            }
+        }
+    }
+
+    /** Renames [photo] to [name] (no extension), keeping its file type. False if Android needs the user's OK first. */
+    suspend fun rename(photo: Photo, name: String): Boolean = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply { put(MediaStore.Images.Media.DISPLAY_NAME, fileNameFor(photo, name)) }
+        try {
+            resolver.update(photo.uri, values, null, null)
+            true
+        } catch (e: SecurityException) {
+            false
+        }
+    }
+
+    fun fileNameFor(photo: Photo, name: String): String {
+        val ext = photo.displayName.substringAfterLast('.', "").ifBlank { "jpg" }
+        return "${name.toFolderName().take(120)}.$ext"
+    }
+
+    /** System dialog asking the user to let SiteSnap delete photos it doesn't own (Android 11+). */
+    fun deleteConsent(photos: List<Photo>): IntentSender? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) MediaStore.createDeleteRequest(resolver, photos.map { it.uri }).intentSender else null
+
+    /** System dialog asking the user to let SiteSnap change photos it doesn't own (Android 11+). */
+    fun writeConsent(photos: List<Photo>): IntentSender? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) MediaStore.createWriteRequest(resolver, photos.map { it.uri }).intentSender else null
+
     /** Emits once immediately, then whenever MediaStore images change. */
     fun changes(): Flow<Unit> = callbackFlow {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -99,5 +156,7 @@ class PhotoRepository(private val context: Context) {
     companion object {
         const val ROOT_FOLDER = "SiteSnap"
         val ROOT_PATH = "${Environment.DIRECTORY_PICTURES}/$ROOT_FOLDER/"
+        /** Trailing photo number, ignoring the " (1)" MediaStore adds to duplicate names. */
+        private val NUMBER_SUFFIX = Regex("""\s(\d{1,5})(?:\s\(\d+\))?$""")
     }
 }

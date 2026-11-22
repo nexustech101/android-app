@@ -30,6 +30,7 @@ object SiteSnapColors {
     val OnInk = Color(0xFFFFFFFF)
     val Accent = Color(0xFFFF5B1F)
     val AccentSoft = Color(0xFFFFE9E0)
+    val Danger = Color(0xFFD92D20)
     val Green = Color(0xFF12A150)
     val GreenSoft = Color(0xFFE3F5EA)
     val Amber = Color(0xFFC46A00)

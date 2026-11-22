@@ -1,5 +1,22 @@
 package com.sitesnap.app.ui.screens
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import com.sitesnap.app.data.AddressLookup
+import com.sitesnap.app.data.AddressSuggestion
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -291,7 +308,7 @@ private fun NewJobSheet(
                 Text("Photos you take go straight into this folder.", style = SiteSnapType.BodySmall, color = SiteSnapColors.InkMuted)
             }
             FilledField("Job name", name, { name = it }, placeholder = "e.g. Henderson Roof Repair")
-            FilledField("Property address", address, { address = it }, placeholder = "Street address", trailing = Icons.Outlined.Place)
+            AddressField(address, { address = it })
             FilledField("Work order # · optional", workOrder, { workOrder = it }, placeholder = "e.g. WO-20931", words = false)
             Row(Modifier.padding(start = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 DriveLogo(size = 22.dp)
@@ -363,5 +380,112 @@ private fun FilledField(
             }
         }
         trailing?.let { Icon(it, null, tint = SiteSnapColors.InkMuted, modifier = Modifier.size(20.dp)) }
+    }
+}
+
+/**
+ * Property address with suggestions as you type, plus a button that fills in the address where the
+ * phone is standing. Typed text is always kept as-is; suggestions only help.
+ */
+@Composable
+private fun AddressField(value: String, onChange: (String) -> Unit) {
+    val context = LocalContext.current
+    val lookup = remember { AddressLookup(context.applicationContext) }
+    val scope = rememberCoroutineScope()
+    var suggestions by remember { mutableStateOf<List<AddressSuggestion>>(emptyList()) }
+    var picked by remember { mutableStateOf<String?>(null) }
+    var focused by remember { mutableStateOf(false) }
+    var locating by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(value) {
+        val query = value.trim()
+        if (!lookup.available || query.length < 4 || value == picked) {
+            suggestions = emptyList()
+            return@LaunchedEffect
+        }
+        delay(350) // wait for a pause in typing
+        suggestions = lookup.search(query).filter { it.full != value }.take(4)
+    }
+
+    fun choose(s: AddressSuggestion) {
+        picked = s.full
+        onChange(s.full)
+        suggestions = emptyList()
+        note = null
+    }
+
+    fun fillFromLocation() {
+        scope.launch {
+            locating = true
+            note = null
+            val here = lookup.addressHere()
+            locating = false
+            if (here != null) choose(here) else note = "Couldn't find an address here. Type it instead."
+        }
+    }
+
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        if (result.values.any { it }) fillFromLocation() else note = "Location is off for SiteSnap, so type the address."
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().background(SiteSnapColors.Fill, RoundedCornerShape(16.dp))
+                .padding(start = 16.dp, end = 8.dp, top = 11.dp, bottom = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text("Property address", style = SiteSnapType.Caption, color = SiteSnapColors.InkMuted)
+                Box {
+                    if (value.isEmpty()) Text("Start typing a street address", style = SiteSnapType.Body, color = SiteSnapColors.InkSubtle)
+                    BasicTextField(
+                        value = value,
+                        onValueChange = { picked = null; onChange(it) },
+                        singleLine = true,
+                        textStyle = SiteSnapType.Body.copy(color = SiteSnapColors.Ink),
+                        cursorBrush = SolidColor(SiteSnapColors.Accent),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                        modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
+                    )
+                }
+            }
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Use my location", enabled = !locating) {
+                    if (lookup.hasLocationPermission()) fillFromLocation()
+                    else locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (locating) CircularProgressIndicator(Modifier.size(18.dp), color = SiteSnapColors.Accent, strokeWidth = 2.dp)
+                else Icon(Icons.Outlined.MyLocation, "Use my location", tint = SiteSnapColors.Accent, modifier = Modifier.size(20.dp))
+            }
+        }
+        AnimatedVisibility(focused && suggestions.isNotEmpty()) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SiteSnapColors.Surface)
+                    .border(1.dp, SiteSnapColors.Hairline, RoundedCornerShape(16.dp)),
+            ) {
+                suggestions.forEachIndexed { i, s ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { choose(s) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Place, null, tint = SiteSnapColors.InkMuted, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(s.primary, style = SiteSnapType.Label, color = SiteSnapColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (s.secondary.isNotBlank()) {
+                                Text(s.secondary, style = SiteSnapType.Caption, color = SiteSnapColors.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                    if (i < suggestions.lastIndex) {
+                        Box(Modifier.fillMaxWidth().padding(start = 44.dp).height(1.dp).background(SiteSnapColors.Hairline))
+                    }
+                }
+            }
+        }
+        note?.let { Text(it, style = SiteSnapType.Caption, color = SiteSnapColors.InkMuted, modifier = Modifier.padding(start = 4.dp)) }
     }
 }

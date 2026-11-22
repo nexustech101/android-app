@@ -24,7 +24,10 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
-/** Minimal Google Drive v3 REST client: find/create folders and upload images. */
+/** The file was deleted in Drive, or SiteSnap can't see it any more. */
+class DriveNotFoundException : IOException("Not found in Drive")
+
+/** Minimal Google Drive v3 REST client: find/create folders, upload images, trash and rename. */
 class DriveClient(private val accessToken: String) {
 
     suspend fun findOrCreateFolder(name: String, parentId: String?): String = withContext(Dispatchers.IO) {
@@ -57,6 +60,21 @@ class DriveClient(private val accessToken: String) {
         idOf(execute(Request.Builder().url("$UPLOAD_API/files?uploadType=multipart&fields=id").post(body)))
     }
 
+    /** Moves a file or folder to Drive's trash (recoverable for 30 days). False if it's already gone. */
+    suspend fun trash(fileId: String): Boolean = patch(fileId, buildJsonObject { put("trashed", true) })
+
+    /** Renames a file. False if it's gone. */
+    suspend fun rename(fileId: String, name: String): Boolean = patch(fileId, buildJsonObject { put("name", name) })
+
+    private suspend fun patch(fileId: String, body: kotlinx.serialization.json.JsonObject): Boolean = withContext(Dispatchers.IO) {
+        try {
+            execute(Request.Builder().url("$API/files/$fileId?fields=id").patch(body.toString().toRequestBody(JSON)))
+            true
+        } catch (e: DriveNotFoundException) {
+            false
+        }
+    }
+
     private fun findFolder(name: String, parentId: String?): String? {
         val parent = parentId ?: "root"
         val q = "mimeType='$FOLDER_MIME' and trashed=false and name='${name.escapeQuery()}' and '$parent' in parents"
@@ -84,6 +102,7 @@ class DriveClient(private val accessToken: String) {
         http.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (response.code == 401) throw DriveAuthException()
+            if (response.code == 404) throw DriveNotFoundException()
             if (!response.isSuccessful) throw IOException("Drive request failed (${response.code}): $text")
             return text
         }

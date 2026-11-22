@@ -4,8 +4,9 @@ An Android app for subcontractors who need to photograph a property before start
 
 ![SiteSnap screenshots](store/screenshots-overview.png)
 
-- **Job folders.** Create a folder per job (name, address, work order #).
-- **Camera.** Take photos straight into the open job folder.
+- **Job folders.** Create a folder per job (name, address, work order #). The address field autocompletes street addresses as you type (the phone's own Geocoder, no API key needed) and has a "Use my location" button. Deleting a job asks for confirmation first, and can also move the job's Drive folder to the trash.
+- **Camera.** Take photos straight into the open job folder. Zoom works like a phone's camera app: pinch with two fingers, tap the lens chips (.5 / 1× / 2 / 5 / 10, depending on the camera), or tap the active chip or drag sideways to get a ruler slider. Tap the viewfinder to focus.
+- **Photo names.** Photos are named `date address number` by default, e.g. `2026-11-22 1420 Oak St 001.jpg`. In the photo viewer you can rename or delete a photo. Long-press in a job folder to select several photos and delete them together. Renames and deletes are mirrored to Drive, where deleted photos go to the trash.
 - **MediaStore storage.** Photos are saved with `MediaStore` under `Pictures/SiteSnap/<Job name>/`, so they also show up in the phone's gallery. The app needs no storage permission (API 29+).
 - **Google Drive sync.** Each job is mirrored to `My Drive / SiteSnap / <Job name>/`. New photos upload in the background (WorkManager), with an optional Wi-Fi-only setting.
 - **In-app updates from GitHub.** On launch the app checks this repo's latest GitHub Release. If it's newer, it offers to download the APK, checks it against GitHub's SHA-256, and hands it to the Android installer.
@@ -62,6 +63,12 @@ Open the folder in Android Studio, or run:
 ./gradlew assembleDebug
 ```
 
+UI tests (`app/src/androidTest/`) drive the real camera screen with a two-finger pinch and the zoom slider. Run them on an emulator or phone whose camera can zoom (the emulator's front camera can):
+
+```
+./gradlew connectedDebugAndroidTest
+```
+
 ## Releases and in-app updates
 
 Distribution is through **GitHub Releases**. Installed apps update themselves from there.
@@ -80,7 +87,7 @@ Distribution is through **GitHub Releases**. Installed apps update themselves fr
 1. Bump `versionCode` (+1) and `versionName` in `app/build.gradle.kts`.
 2. Build and publish. This needs the GitHub CLI (`gh auth login` once):
    ```
-   .elease.ps1 -Publish -Notes "What changed"
+   .\release.ps1 -Publish -Notes "What changed"
    ```
    This builds `dist/SiteSnap-<version>.apk`, creates tag `v<version>`, and attaches the APK. Leave out `-Publish` to only build the APK. Releases must be normal releases. Drafts and pre-releases are ignored, because the app reads `/releases/latest`.
 
@@ -95,3 +102,5 @@ Distribution is through **GitHub Releases**. Installed apps update themselves fr
 ## Store screenshots
 
 `store/screenshots/` holds six 1080×1920 Play Store-style screenshots. Regenerate them with `python store/make_screenshots.py`. Raw emulator captures of the demo data live in `store/raw/`. The camera image uses the app's real camera UI with a job-site photo in place of the emulator's test scene. The same layouts are also on the "Play Store screenshots" page in Figma.
+
+The app icon is an adaptive vector: a house with a camera lens for a window, on a safety-orange gradient (`res/drawable/ic_launcher_*.xml`). It includes a monochrome layer for themed icons. `python store/make_icon.py` renders the 512×512 store icon (`store/icon-512.png`).

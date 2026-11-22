@@ -60,8 +60,8 @@ fun WelcomeScreen(onConnected: (String?) -> Unit, onSkip: () -> Unit) {
             PhotoStack(Modifier.fillMaxWidth().height(340.dp))
             Column(Modifier.padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(26.dp).background(SiteSnapColors.Ink, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Outlined.PhotoCamera, null, tint = SiteSnapColors.OnInk, modifier = Modifier.size(15.dp))
+                    Box(Modifier.size(30.dp).background(SiteSnapColors.Accent, RoundedCornerShape(9.dp)), contentAlignment = Alignment.Center) {
+                        Icon(painterResource(R.drawable.ic_logo_mark), null, tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                     Text("SiteSnap", style = SiteSnapType.Subtitle, color = SiteSnapColors.Ink)
                 }

@@ -3,7 +3,11 @@ package com.sitesnap.app.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +30,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Place
@@ -75,6 +82,12 @@ fun JobFolderScreen(vm: AppViewModel, job: Job, onBack: () -> Unit, onTakePhotos
     val photos by photosFlow.collectAsState(initial = emptyList())
     var filter by rememberSaveable { mutableStateOf(0) }
     var menuOpen by remember { mutableStateOf(false) }
+    var confirmDeleteJob by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<Long?>(null) }
+    var selected by remember { mutableStateOf(emptySet<Long>()) }
+    var confirmDeleteSelected by remember { mutableStateOf(false) }
+    val selecting = selected.isNotEmpty()
+    BackHandler(enabled = selecting) { selected = emptySet() }
 
     val backsUp = state.driveConnected && job.syncToDrive
     val waiting = if (backsUp) photos.filter { it.id !in state.uploaded } else emptyList()
@@ -98,7 +111,21 @@ fun JobFolderScreen(vm: AppViewModel, job: Job, onBack: () -> Unit, onTakePhotos
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Column {
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    if (selecting) Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CircleIconButton(Icons.Outlined.Close, "Cancel selection", { selected = emptySet() })
+                        Text(
+                            "${selected.size} selected",
+                            style = SiteSnapType.Title, color = SiteSnapColors.Ink,
+                            modifier = Modifier.weight(1f).padding(start = 12.dp),
+                        )
+                        Text(
+                            if (selected.size == shown.size) "Select none" else "Select all",
+                            style = SiteSnapType.Label, color = SiteSnapColors.Accent,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).clickable {
+                                selected = if (selected.size == shown.size) emptySet() else shown.map { it.id }.toSet()
+                            }.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    } else Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         CircleIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back", onBack)
                         Box {
                             CircleIconButton(Icons.Outlined.MoreVert, "More", { menuOpen = true })
@@ -117,6 +144,17 @@ fun JobFolderScreen(vm: AppViewModel, job: Job, onBack: () -> Unit, onTakePhotos
                                         },
                                     )
                                 }
+                                if (photos.isNotEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Select photos", style = SiteSnapType.Label) },
+                                        onClick = { menuOpen = false; selected = setOfNotNull(shown.firstOrNull()?.id) },
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Delete job", style = SiteSnapType.Label, color = SiteSnapColors.Danger) },
+                                    leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, tint = SiteSnapColors.Danger) },
+                                    onClick = { menuOpen = false; confirmDeleteJob = true },
+                                )
                             }
                         }
                     }
@@ -162,10 +200,16 @@ fun JobFolderScreen(vm: AppViewModel, job: Job, onBack: () -> Unit, onTakePhotos
                     }
                 }
                 items(dayPhotos, key = { it.id }) { photo ->
-                    PhotoTile(photo, waiting = backsUp && photo.id !in state.uploaded) {
-                        val view = Intent(Intent.ACTION_VIEW).setDataAndType(photo.uri, photo.mimeType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        runCatching { context.startActivity(view) }
-                    }
+                    PhotoTile(
+                        photo,
+                        waiting = backsUp && photo.id !in state.uploaded,
+                        selected = if (selecting) photo.id in selected else null,
+                        onClick = {
+                            if (selecting) selected = if (photo.id in selected) selected - photo.id else selected + photo.id
+                            else viewing = photo.id
+                        },
+                        onLongClick = { selected = selected + photo.id },
+                    )
                 }
             }
         }
@@ -174,13 +218,56 @@ fun JobFolderScreen(vm: AppViewModel, job: Job, onBack: () -> Unit, onTakePhotos
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(160.dp)
                 .background(Brush.verticalGradient(listOf(SiteSnapColors.Bg.copy(alpha = 0f), SiteSnapColors.Bg.copy(alpha = 0.95f), SiteSnapColors.Bg)))
         )
-        PillButton(
-            "Take photos",
-            onClick = onTakePhotos,
-            style = ButtonStyle.Accent,
-            icon = Icons.Outlined.PhotoCamera,
-            height = 56.dp,
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp),
+        if (selecting) {
+            PillButton(
+                "Delete ${photoCountLabel(selected.size)}",
+                onClick = { confirmDeleteSelected = true },
+                style = ButtonStyle.Danger,
+                icon = Icons.Outlined.DeleteOutline,
+                height = 56.dp,
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp),
+            )
+        } else {
+            PillButton(
+                "Take photos",
+                onClick = onTakePhotos,
+                style = ButtonStyle.Accent,
+                icon = Icons.Outlined.PhotoCamera,
+                height = 56.dp,
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 24.dp),
+            )
+        }
+
+        viewing?.let { id ->
+            PhotoViewer(
+                photos = shown,
+                startId = id,
+                uploaded = state.uploaded.keys,
+                onClose = { viewing = null },
+                onRename = vm::renamePhoto,
+                onDelete = { vm.deletePhotos(listOf(it)) },
+            )
+        }
+    }
+
+    if (confirmDeleteJob) {
+        DeleteJobDialog(
+            job = job,
+            photoCount = photos.size,
+            onDismiss = { confirmDeleteJob = false },
+            onConfirm = { trash -> confirmDeleteJob = false; vm.deleteJob(job, trash) {} },
+        )
+    }
+    if (confirmDeleteSelected) {
+        val chosen = photos.filter { it.id in selected }
+        DeletePhotosDialog(
+            count = chosen.size,
+            inDrive = chosen.count { it.id in state.uploaded },
+            onDismiss = { confirmDeleteSelected = false },
+            onConfirm = {
+                confirmDeleteSelected = false
+                vm.deletePhotos(chosen) { selected = emptySet() }
+            },
         )
     }
 }
@@ -196,12 +283,26 @@ private fun StatTile(value: String, label: String, dot: Color?, modifier: Modifi
     }
 }
 
+/** [selected] is null outside selection mode. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PhotoTile(photo: Photo, waiting: Boolean, onClick: () -> Unit) {
+private fun PhotoTile(photo: Photo, waiting: Boolean, selected: Boolean?, onClick: () -> Unit, onLongClick: () -> Unit) {
     Box(
-        Modifier.aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(SiteSnapColors.Fill).clickable(onClick = onClick)
+        Modifier.aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(SiteSnapColors.Fill)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick, onLongClickLabel = "Select")
     ) {
         AsyncImage(model = photo.uri, contentDescription = photo.displayName, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (selected != null) {
+            if (selected) Box(Modifier.fillMaxSize().border(3.dp, SiteSnapColors.Accent, RoundedCornerShape(14.dp)).background(SiteSnapColors.Accent.copy(alpha = 0.18f)))
+            Box(
+                Modifier.align(Alignment.TopStart).padding(6.dp).size(24.dp)
+                    .background(if (selected) SiteSnapColors.Accent else Color.Black.copy(alpha = 0.3f), CircleShape)
+                    .border(2.dp, Color.White, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) Icon(Icons.Outlined.Check, "Selected", tint = Color.White, modifier = Modifier.size(14.dp))
+            }
+        }
         if (waiting) {
             Box(
                 Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape),
