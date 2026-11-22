@@ -37,8 +37,14 @@ if ($Publish) {
     if (-not $repo) { throw "Set sitesnap.githubRepo in gradle.properties before publishing." }
     # Must be a normal (not draft, not pre-release) release: the app reads /releases/latest.
     $ghArgs = @("release", "create", "v$version", $apk, "--repo", $repo, "--title", "SiteSnap $version")
-    if ($Notes) { $ghArgs += @("--notes", $Notes) } else { $ghArgs += "--generate-notes" }
-    & gh @ghArgs
+    # Notes go through a file: Windows PowerShell mangles native arguments that contain double quotes.
+    $notesFile = $null
+    if ($Notes) {
+        $notesFile = New-TemporaryFile
+        [IO.File]::WriteAllText($notesFile.FullName, $Notes, (New-Object Text.UTF8Encoding $false))
+        $ghArgs += @("--notes-file", $notesFile.FullName)
+    } else { $ghArgs += "--generate-notes" }
+    try { & gh @ghArgs } finally { if ($notesFile) { Remove-Item $notesFile.FullName -Force } }
     if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
     Write-Host "Published v$version to https://github.com/$repo/releases"
 }
