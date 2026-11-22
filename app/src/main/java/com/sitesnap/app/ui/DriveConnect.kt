@@ -24,12 +24,13 @@ fun rememberDriveConnect(onConnected: (email: String?) -> Unit, onFailed: (Strin
     val failed by rememberUpdatedState(onFailed)
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            runCatching { DriveAuth.resultFromIntent(context, result.data) }
-                .onSuccess { connected(DriveAuth.email(it)) }
-                .onFailure { failed(it.message ?: "Authorization failed") }
-        } else {
-            failed("Google Drive access was not granted")
+        // Google returns its reason (e.g. error 10 for a missing OAuth client) in the result data even
+        // when the screen closes without granting access, so always read it.
+        val auth = result.data?.let { data -> runCatching { DriveAuth.resultFromIntent(context, data) } }
+        when {
+            auth?.isFailure == true -> failed(DriveAuth.describe(auth.exceptionOrNull()!!))
+            result.resultCode == Activity.RESULT_OK && auth != null -> connected(DriveAuth.email(auth.getOrThrow()))
+            else -> failed("Google Drive access was not granted. Tap Connect and choose Allow on Google's screen.")
         }
     }
 
@@ -44,7 +45,7 @@ fun rememberDriveConnect(onConnected: (email: String?) -> Unit, onFailed: (Strin
                         connected(DriveAuth.email(result))
                     }
                 }
-                .onFailure { failed(it.message ?: "Couldn't reach Google Play services") }
+                .onFailure { failed(DriveAuth.describe(it)) }
         }
     }
 }

@@ -28,8 +28,8 @@ android {
         minSdk = 29
         targetSdk = 36
         // Bump both for every GitHub release. versionName must match the release tag (v1.0.0 -> 1.0.0).
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
         buildConfigField("String", "UPDATE_API_BASE", "\"$updateApiBase\"")
