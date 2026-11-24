@@ -28,9 +28,6 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,21 +42,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import com.sitesnap.app.R
-import com.sitesnap.app.SyncStatus
 import com.sitesnap.app.ui.components.ButtonStyle
 import com.sitesnap.app.ui.components.DriveLogo
 import com.sitesnap.app.ui.components.PillButton
-import com.sitesnap.app.ui.components.StatusPill
 import com.sitesnap.app.ui.rememberDriveConnect
 import com.sitesnap.app.ui.theme.SiteSnapColors
 import com.sitesnap.app.ui.theme.SiteSnapType
@@ -69,59 +63,59 @@ import kotlin.math.absoluteValue
 /** Time each slide stays up before the carousel moves on by itself (until the user swipes). */
 private const val AutoAdvanceMillis = 4_500L
 
+/** Card colours, matching the Play Store screenshots: accent orange, ink, and a warm grey. */
+private enum class CardTheme(val bg: Color, val overline: Color, val title: Color) {
+    Accent(SiteSnapColors.Accent, SiteSnapColors.Ink, Color.White),
+    Ink(SiteSnapColors.Ink, SiteSnapColors.Accent, Color.White),
+    Warm(Color(0xFFE6E4DE), SiteSnapColors.Accent, SiteSnapColors.Ink),
+}
+
 /**
- * One onboarding slide: a demo job photo with a Humaaans person (Pablo Stanley, via Blush) standing in
- * front of it, plus the text shown under the carousel.
+ * One onboarding slide: a coloured card with a short headline and a phone showing that part of the
+ * app (rendered by store/make_onboarding.py), plus the sentence shown under the carousel.
  */
 private class Slide(
-    @DrawableRes val photo: Int,
-    @DrawableRes val person: Int,
-    val personHeight: Dp,
-    /** The person stands at the card's left edge (else its right edge). */
-    val personAtStart: Boolean,
-    /** Flip the person so they face into the photo. */
-    val mirrorPerson: Boolean,
+    @DrawableRes val phone: Int,
+    val theme: CardTheme,
+    val overline: String,
     val title: String,
     val body: String,
-    val badge: @Composable () -> Unit,
 )
 
 private val slides = listOf(
     Slide(
-        photo = R.drawable.onboarding_house,
-        person = R.drawable.humaaans_walk,
-        personHeight = 166.dp,
-        personAtStart = true,
-        mirrorPerson = false,
-        title = "Before photos,\nsorted by job.",
+        phone = R.drawable.onboarding_jobs,
+        theme = CardTheme.Accent,
+        overline = "JOBS",
+        title = "Every property,\nits own folder",
         body = "Make a folder for each job with its address and work order number.",
-        badge = { GlassChip(Icons.Outlined.Folder, "1420 Oak St") },
     ),
     Slide(
-        photo = R.drawable.onboarding_deck,
-        person = R.drawable.humaaans_point,
-        personHeight = 166.dp,
-        personAtStart = false,
-        mirrorPerson = true,
-        title = "Shoot straight\ninto the job.",
+        phone = R.drawable.onboarding_camera,
+        theme = CardTheme.Ink,
+        overline = "CAMERA",
+        title = "Shoot straight into\nthe job folder",
         body = "Pinch to zoom, tap to focus. Photos are named by date, address and number.",
-        badge = { GlassChip(Icons.Outlined.PhotoCamera, "Lakeview Deck 003") },
     ),
     Slide(
-        photo = R.drawable.onboarding_kitchen,
-        person = R.drawable.humaaans_sit,
-        personHeight = 152.dp,
-        personAtStart = false,
-        mirrorPerson = true,
-        title = "Backed up to\nGoogle Drive.",
-        body = "Each job gets its own Drive folder. New photos upload in the background.",
-        badge = { StatusPill(SyncStatus.Synced, 0, label = "Backed up to Drive") },
+        phone = R.drawable.onboarding_folder,
+        theme = CardTheme.Warm,
+        overline = "JOB FOLDER",
+        title = "Before photos,\nsorted by day",
+        body = "See at a glance which photos are backed up and which are still waiting.",
+    ),
+    Slide(
+        phone = R.drawable.onboarding_drive,
+        theme = CardTheme.Accent,
+        overline = "GOOGLE DRIVE",
+        title = "Backed up to\nyour Google Drive",
+        body = "Each job gets its own Drive folder. Sync on Wi-Fi, or whenever you choose.",
     ),
 )
 
 /**
- * First-run onboarding: a full-screen photo carousel with page dots, and sign-in to Google Drive
- * (or carry on offline) always one tap away underneath.
+ * First-run onboarding: a full-screen carousel of app previews with page dots, and sign-in to Google
+ * Drive (or carry on offline) always one tap away underneath.
  */
 @Composable
 fun WelcomeScreen(onConnected: (String?) -> Unit, onSkip: () -> Unit) {
@@ -153,24 +147,28 @@ fun WelcomeScreen(onConnected: (String?) -> Unit, onSkip: () -> Unit) {
             SlideCard(
                 slides[page],
                 Modifier.fillMaxSize().graphicsLayer {
-                    scaleY = lerp(1f, 0.88f, offset)
-                    alpha = lerp(1f, 0.75f, offset)
+                    scaleY = lerp(1f, 0.9f, offset)
+                    alpha = lerp(1f, 0.7f, offset)
                 },
             )
         }
 
-        PageDots(count = slides.size, current = pager.currentPage, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 18.dp))
+        PageDots(count = slides.size, current = pager.currentPage, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 14.dp))
 
         AnimatedContent(
             targetState = pager.currentPage,
             transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(120)) },
             label = "slide text",
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
+            modifier = Modifier.padding(horizontal = 32.dp, vertical = 14.dp),
         ) { page ->
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(slides[page].title, style = SiteSnapType.Headline, color = SiteSnapColors.Ink, minLines = 2)
-                Text(slides[page].body, style = SiteSnapType.Body, color = SiteSnapColors.InkMuted, minLines = 2)
-            }
+            Text(
+                slides[page].body,
+                style = SiteSnapType.Body,
+                color = SiteSnapColors.InkMuted,
+                textAlign = TextAlign.Center,
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         Column(
@@ -205,42 +203,40 @@ private fun AutoAdvance(pager: PagerState) {
     }
 }
 
+/** Coloured card: overline and headline on top, and a phone preview that runs off the bottom edge. */
 @Composable
 private fun SlideCard(slide: Slide, modifier: Modifier) {
     val shape = RoundedCornerShape(32.dp)
-    Box(modifier.semantics { contentDescription = slide.title.replace('\n', ' ') }) {
-        // Bottom padding leaves room for the person's feet to step past the card's edge.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(bottom = 16.dp)
-                .shadow(18.dp, shape, spotColor = Color.Black.copy(alpha = 0.25f))
-                .clip(shape),
-        ) {
-            Image(painterResource(slide.photo), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            Box(Modifier.padding(16.dp)) { slide.badge() }
-        }
-        Image(
-            painterResource(slide.person),
-            contentDescription = null,
-            modifier = Modifier
-                .align(if (slide.personAtStart) Alignment.BottomStart else Alignment.BottomEnd)
-                .padding(horizontal = 18.dp)
-                .height(slide.personHeight)
-                .graphicsLayer { if (slide.mirrorPerson) scaleX = -1f },
-        )
-    }
-}
-
-@Composable
-private fun GlassChip(icon: ImageVector, text: String) {
-    Row(
-        Modifier.clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Column(
+        modifier
+            .padding(bottom = 12.dp)
+            .shadow(14.dp, shape, spotColor = Color.Black.copy(alpha = 0.2f))
+            .clip(shape)
+            .background(slide.theme.bg)
+            .semantics { contentDescription = slide.title.replace('\n', ' ') },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(16.dp))
-        Text(text, style = SiteSnapType.Caption, color = Color.White)
+        Text(
+            slide.overline,
+            style = SiteSnapType.Overline.copy(letterSpacing = 2.sp),
+            color = slide.theme.overline,
+            modifier = Modifier.padding(top = 26.dp),
+        )
+        Text(
+            slide.title,
+            style = SiteSnapType.Headline,
+            color = slide.theme.title,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
+        )
+        Image(
+            painterResource(slide.phone),
+            contentDescription = null,
+            contentScale = ContentScale.FillWidth,
+            alignment = Alignment.TopCenter,
+            modifier = Modifier.fillMaxSize().padding(top = 4.dp).padding(horizontal = 14.dp),
+        )
     }
 }
 

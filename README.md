@@ -13,7 +13,7 @@ An Android app for subcontractors who need to photograph a property before start
 
 **Design:** [Figma: SiteSnap – Android App](https://www.figma.com/design/02IX64ogIIqbAdgUf3lu1V). The current design is on the **v2** page: a warm neutral palette, ink with a safety-orange accent, Plus Jakarta Sans, borderless soft cards, photo-first job cards, a floating dock and glass camera controls. The first design is kept on the "v1 · Original" page. The Compose theme in `ui/theme/Theme.kt` uses the v2 tokens.
 
-**Onboarding:** on first launch, a full-screen carousel shows three demo job photos with page dots. It moves on by itself until the user swipes. "Continue with Google Drive" and "Use offline for now" stay visible on every slide. The illustrated people are from [Humaaans](https://blush.design/collections/humaaans/humaaans) by Pablo Stanley, made on Blush and used under the [Blush license](https://blush.design/license) (free for commercial use, no attribution required). They're stored in `res/drawable-nodpi/humaaans_*.png`.
+**Onboarding:** on first launch, a full-screen carousel shows four cards in the style of the store screenshots (Jobs, Camera, Job folder, Google Drive), with page dots. Each card has a coloured background, a headline and a phone preview of that screen. It moves on by itself until the user swipes. "Continue with Google Drive" and "Use offline for now" stay visible on every slide. The phone previews (`res/drawable-nodpi/onboarding_*.webp`) are rendered from `store/raw/` by `python store/make_onboarding.py`.
 
 **Font:** Plus Jakarta Sans (`app/src/main/res/font/plus_jakarta_sans.ttf`) is bundled under the SIL Open Font License. See `licenses/PlusJakartaSans-OFL.txt`.
 
